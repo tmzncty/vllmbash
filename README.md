@@ -20,5 +20,20 @@
 
 ## vllm_run_in_docker
 在一些容器里面直接运行。
+
+
+正确的下载命令应该是：
+```bash
+wget https://raw.githubusercontent.com/tmzncty/vllmbash/main/vllm_in_docker.sh
+```
+
+
+```bash
+bash vllm_in_docker.sh
+```
+**总结一下规律：**
+* 从 GitHub 下载文件供程序（如 `bash`）使用时，要确保 URL 指向的是 **raw** 内容。
+* 网页链接通常包含 `/blob/`。
+* Raw 链接通常在 `raw.githubusercontent.com` 这个域名下，并且路径中没有 `/blob/`。
 ## vllm_run
 在sudo的场景运行。
