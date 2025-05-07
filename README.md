@@ -28,9 +28,6 @@
 wget https://raw.githubusercontent.com/tmzncty/vllmbash/main/vllm_in_docker.sh
 ```
 
-```bash
-wget https://raw.githubusercontent.com/tmzncty/vllmbash/main/vllm235.sh
-```
 
 
 ```bash
@@ -42,3 +39,7 @@ bash vllm_in_docker.sh
 * Raw 链接通常在 `raw.githubusercontent.com` 这个域名下，并且路径中没有 `/blob/`。
 ## vllm_run
 在sudo的场景运行。
+
+```bash
+wget https://raw.githubusercontent.com/tmzncty/vllmbash/main/vllm235.sh
+```
