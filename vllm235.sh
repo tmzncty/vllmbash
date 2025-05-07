@@ -22,11 +22,11 @@ MODEL_CACHE_DIR="/AISPK" # Hauptverzeichnis für ModelScope-Downloads
 VLLM_MODEL_PATH="$MODEL_CACHE_DIR/$MODEL_ID_MODELSCOPE" # vLLM erwartet den vollständigen Pfad zum heruntergeladenen Modell
 
 # vLLM Server Configuration
-TENSOR_PARALLEL_SIZE=8        # Für 8x L40 GPUs
-GPU_MEMORY_UTILIZATION=0.9    # Adjust GPU memory usage fraction
-MAX_NUM_SEQS=256              # Kann je nach Bedarf und Speicher angepasst werden
+TENSOR_PARALLEL_SIZE=8       # Für 8x L40 GPUs
+GPU_MEMORY_UTILIZATION=0.9   # Adjust GPU memory usage fraction
+MAX_NUM_SEQS=256             # Kann je nach Bedarf und Speicher angepasst werden
 HOST_IP="0.0.0.0"
-PORT="48556"                  # Neuer Port
+PORT="48556"                 # Neuer Port
 LOG_FILE="$HOME/vllm_server.log" # Log-Datei für den Hintergrundprozess
 
 # --- 1. System Updates and Dependencies ---
@@ -41,41 +41,39 @@ echo "Downloading Miniconda installer from Tsinghua mirror..."
 if [ -f "$MINICONDA_SCRIPT_NAME" ]; then
     echo "Miniconda installer already downloaded."
 else
-    wget "$MINICONDA_DOWNLOAD_URL$MINICONDA_SCRIPT_NAME" -O $MINICONDA_SCRIPT_NAME
+    wget "$MINICONDA_DOWNLOAD_URL$MINICONDA_SCRIPT_NAME" -O "$MINICONDA_SCRIPT_NAME"
 fi
 
 echo "Installing Miniconda to $MINICONDA_INSTALL_PATH..."
 if [ -d "$MINICONDA_INSTALL_PATH" ]; then
     echo "Miniconda directory already exists. Skipping installation."
 else
-    bash $MINICONDA_SCRIPT_NAME -b -p $MINICONDA_INSTALL_PATH
+    bash "$MINICONDA_SCRIPT_NAME" -b -p "$MINICONDA_INSTALL_PATH"
     echo "Miniconda installed."
     echo "Cleaning up Miniconda installer script..."
-    rm $MINICONDA_SCRIPT_NAME
+    rm "$MINICONDA_SCRIPT_NAME"
 fi
 
 # --- 3. Initialize Conda for this script and Configure Mirrors ---
 echo "Initializing Conda environment for script..."
-eval "$($MINICONDA_INSTALL_PATH/bin/conda shell.bash hook)"
-$MINICONDA_INSTALL_PATH/bin/conda init bash > /dev/null 2>&1 || true
+eval "$("$MINICONDA_INSTALL_PATH/bin/conda" shell.bash hook)"
+"$MINICONDA_INSTALL_PATH/bin/conda" init bash > /dev/null 2>&1 || true
 
 echo "Configuring Conda to use Tsinghua mirrors..."
-# Konfigurieren Sie Conda-Kanäle für den aktuellen Benutzer ($HOME/.condarc)
-# Entfernen Sie den 'defaults'-Kanal, um Konflikte zu vermeiden und sicherzustellen, dass nur Tsinghua-Spiegel verwendet werden (optional aber empfohlen)
-# $MINICONDA_INSTALL_PATH/bin/conda config --remove channels defaults || true
-$MINICONDA_INSTALL_PATH/bin/conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
-$MINICONDA_INSTALL_PATH/bin/conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/r/
-$MINICONDA_INSTALL_PATH/bin/conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
-$MINICONDA_INSTALL_PATH/bin/conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/ # Nützlich für PyTorch und verwandte Pakete
-$MINICONDA_INSTALL_PATH/bin/conda config --set show_channel_urls yes
+"$MINICONDA_INSTALL_PATH/bin/conda" config --remove channels defaults || true # Optional aber oft empfohlen
+"$MINICONDA_INSTALL_PATH/bin/conda" config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
+"$MINICONDA_INSTALL_PATH/bin/conda" config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/r/
+"$MINICONDA_INSTALL_PATH/bin/conda" config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
+"$MINICONDA_INSTALL_PATH/bin/conda" config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/
+"$MINICONDA_INSTALL_PATH/bin/conda" config --set show_channel_urls yes
 echo "Conda channels configured to use Tsinghua mirrors."
 
 # --- 4. Create and Setup Conda Environment ---
 echo "Creating Conda environment '$CONDA_ENV_NAME' with Python $PYTHON_VERSION..."
-if conda info --envs | grep -q "^$CONDA_ENV_NAME\s"; then
+if "$MINICONDA_INSTALL_PATH/bin/conda" info --envs | grep -q "^$CONDA_ENV_NAME\s"; then
    echo "Conda environment '$CONDA_ENV_NAME' already exists. Skipping creation."
 else
-    conda create -n $CONDA_ENV_NAME python=$PYTHON_VERSION -y
+    "$MINICONDA_INSTALL_PATH/bin/conda" create -n "$CONDA_ENV_NAME" python="$PYTHON_VERSION" -y
     echo "Conda environment '$CONDA_ENV_NAME' created."
 fi
 
@@ -85,50 +83,47 @@ source "$MINICONDA_INSTALL_PATH/bin/activate" "$CONDA_ENV_NAME"
 
 echo "Configuring pip to use Tsinghua mirror..."
 pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-# Optional: Überprüfen Sie die Pip-Konfiguration
-# pip config list
 
 echo "Upgrading pip..."
 pip install --upgrade pip
 
 echo "Installing vLLM, nvitop, and modelscope..."
-pip install vllm nvitop modelscope "tf-keras>=2.13" # tf-keras hinzugefügt
+pip install vllm nvitop modelscope "tf-keras>=2.13"
 
 echo "vLLM, nvitop, and modelscope installed/updated successfully in '$CONDA_ENV_NAME'."
 
 # --- 6. Download Model from ModelScope ---
 echo "Checking for model $MODEL_ID_MODELSCOPE in $MODEL_CACHE_DIR..."
-if [ ! -d "$MODEL_CACHE_DIR" ]; then
-    echo "Creating ModelScope cache directory: $MODEL_CACHE_DIR"
-    sudo mkdir -p "$MODEL_CACHE_DIR"
-    sudo chown "$USER":"$USER" "$MODEL_CACHE_DIR"
-fi
+
+# 确保 MODEL_CACHE_DIR 存在，并且当前用户拥有其所有权
+echo "Ensuring ModelScope cache directory exists: $MODEL_CACHE_DIR"
+sudo mkdir -p "$MODEL_CACHE_DIR" # 如果目录不存在则创建，此时可能归属于 root
+
+echo "Ensuring current user ($USER) owns $MODEL_CACHE_DIR..."
+# 无论目录是否已存在，都确保当前用户是所有者
+sudo chown "$USER":"$USER" "$MODEL_CACHE_DIR"
+# 为了更加保险，明确给予用户读写执行权限
+sudo chmod u+rwx "$MODEL_CACHE_DIR"
 
 # Für ModelScope-Downloads: modelscope.cn ist die primäre Quelle.
-# Wenn Sie einen bestimmten Endpunkt für die ModelScope API verwenden möchten (z.B. für regionale Server, falls verfügbar):
 # export MODELSCOPE_HUB_ENDPOINT="https://modelscope.cn/api/v1" # Dies ist oft der Standardwert
 
 if [ -d "$VLLM_MODEL_PATH" ]; then
     echo "Model $MODEL_ID_MODELSCOPE already found in $VLLM_MODEL_PATH. Skipping download."
 else
     echo "Downloading model $MODEL_ID_MODELSCOPE from ModelScope to $MODEL_CACHE_DIR..."
-    # Setzen Sie die Umgebungsvariable für ModelScope-Cache und optional den Endpunkt
     # Die Umgebung muss aktiv sein, damit `python` und `modelscope` gefunden werden
     python -c "
 from modelscope.hub.snapshot_download import snapshot_download
 import os
 os.environ['MODELSCOPE_CACHE'] = '$MODEL_CACHE_DIR'
-# Optional: Falls Sie einen spezifischen ModelScope API Endpunkt verwenden möchten:
-# os.environ['MODELSCOPE_HUB_ENDPOINT'] = 'https://modelscope.cn/api/v1' # Beispiel
-# Für schnellere Downloads von ModelScope, wenn mehrere Dateien parallel heruntergeladen werden können:
-# os.environ['MODELSCOPE_DOWNLOAD_PARALLEL'] = '8' # Anzahl paralleler Downloads, Standard ist 4
-# Für Debugging-Ausgaben von ModelScope SDK:
+# os.environ['MODELSCOPE_HUB_ENDPOINT'] = 'https://modelscope.cn/api/v1'
+# os.environ['MODELSCOPE_DOWNLOAD_PARALLEL'] = '8'
 # os.environ['MODELSCOPE_SDK_DEBUG'] = '1'
 
 snapshot_download(
     '$MODEL_ID_MODELSCOPE',
-    cache_dir='$MODEL_CACHE_DIR',
-    local_dir_layout='{model_id}' # Stellt sicher, dass der Pfad $MODEL_CACHE_DIR/$MODEL_ID_MODELSCOPE ist
+    cache_dir='$MODEL_CACHE_DIR'
 )
 "
     echo "Model downloaded."
@@ -147,7 +142,7 @@ echo "--------------------------------------------------"
 
 if [[ "$CONDA_DEFAULT_ENV" != "$CONDA_ENV_NAME" && "$CONDA_PREFIX" != "$MINICONDA_INSTALL_PATH/envs/$CONDA_ENV_NAME" ]]; then
     echo "Error: Failed to activate conda environment '$CONDA_ENV_NAME' properly. Exiting."
-    conda info --envs || echo "Failed to get conda info."
+    "$MINICONDA_INSTALL_PATH/bin/conda" info --envs || echo "Failed to get conda info."
     exit 1
 fi
 echo "Conda environment '$CONDA_DEFAULT_ENV' is active."
