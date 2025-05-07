@@ -15,6 +15,7 @@
     ```bash
     bash nccltest.bash
     ```
+    
 
 这样应该就能正确执行脚本了（前提是脚本本身没有其他语法错误）。
 
@@ -25,6 +26,10 @@
 正确的下载命令应该是：
 ```bash
 wget https://raw.githubusercontent.com/tmzncty/vllmbash/main/vllm_in_docker.sh
+```
+
+```bash
+wget https://raw.githubusercontent.com/tmzncty/vllmbash/main/vllm235.sh
 ```
 
 
