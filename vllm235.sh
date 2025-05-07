@@ -12,6 +12,8 @@ set -o pipefail
 MINICONDA_INSTALL_PATH="$HOME/miniconda3"
 CONDA_ENV_NAME="vllm"
 PYTHON_VERSION="3.12" # Stellen Sie sicher, dass vLLM und ModelScope mit dieser Version kompatibel sind
+# Verwenden Sie den Tsinghua-Spiegel für Miniconda
+MINICONDA_DOWNLOAD_URL="https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/"
 MINICONDA_SCRIPT_NAME="Miniconda3-latest-Linux-x86_64.sh"
 
 # ModelScope Configuration
@@ -20,26 +22,26 @@ MODEL_CACHE_DIR="/AISPK" # Hauptverzeichnis für ModelScope-Downloads
 VLLM_MODEL_PATH="$MODEL_CACHE_DIR/$MODEL_ID_MODELSCOPE" # vLLM erwartet den vollständigen Pfad zum heruntergeladenen Modell
 
 # vLLM Server Configuration
-# MODEL_NAME wird jetzt durch VLLM_MODEL_PATH oben definiert
-TENSOR_PARALLEL_SIZE=8           # Für 8x L40 GPUs
-GPU_MEMORY_UTILIZATION=0.9       # Adjust GPU memory usage fraction
-MAX_NUM_SEQS=256                 # Kann je nach Bedarf und Speicher angepasst werden
+TENSOR_PARALLEL_SIZE=8        # Für 8x L40 GPUs
+GPU_MEMORY_UTILIZATION=0.9    # Adjust GPU memory usage fraction
+MAX_NUM_SEQS=256              # Kann je nach Bedarf und Speicher angepasst werden
 HOST_IP="0.0.0.0"
-PORT="48556"                     # Neuer Port
+PORT="48556"                  # Neuer Port
 LOG_FILE="$HOME/vllm_server.log" # Log-Datei für den Hintergrundprozess
 
 # --- 1. System Updates and Dependencies ---
 echo "Updating package lists and installing dependencies (wget, btop, build-essential, python3-pip, ufw)..."
+# Hinweis: Wenn apt update langsam ist, sollten Sie Ihre System-APT-Quellen (/etc/apt/sources.list) auf einen regionalen Spiegel umstellen.
 sudo apt update
 sudo apt install -y wget btop build-essential python3-pip ufw
 echo "System dependencies installed."
 
 # --- 2. Download and Install Miniconda (Non-Interactive) ---
-echo "Downloading Miniconda installer..."
+echo "Downloading Miniconda installer from Tsinghua mirror..."
 if [ -f "$MINICONDA_SCRIPT_NAME" ]; then
     echo "Miniconda installer already downloaded."
 else
-    wget https://repo.anaconda.com/miniconda/$MINICONDA_SCRIPT_NAME -O $MINICONDA_SCRIPT_NAME
+    wget "$MINICONDA_DOWNLOAD_URL$MINICONDA_SCRIPT_NAME" -O $MINICONDA_SCRIPT_NAME
 fi
 
 echo "Installing Miniconda to $MINICONDA_INSTALL_PATH..."
@@ -52,63 +54,82 @@ else
     rm $MINICONDA_SCRIPT_NAME
 fi
 
-# --- 3. Initialize Conda for this script ---
+# --- 3. Initialize Conda for this script and Configure Mirrors ---
 echo "Initializing Conda environment for script..."
 eval "$($MINICONDA_INSTALL_PATH/bin/conda shell.bash hook)"
-# Die folgende Zeile kann Fehler ausgeben, wenn .bashrc nicht interaktiv ist, aber sie ist oft notwendig.
-# Leiten Sie Fehler um, wenn sie stören, aber stellen Sie sicher, dass Conda initialisiert ist.
 $MINICONDA_INSTALL_PATH/bin/conda init bash > /dev/null 2>&1 || true
+
+echo "Configuring Conda to use Tsinghua mirrors..."
+# Konfigurieren Sie Conda-Kanäle für den aktuellen Benutzer ($HOME/.condarc)
+# Entfernen Sie den 'defaults'-Kanal, um Konflikte zu vermeiden und sicherzustellen, dass nur Tsinghua-Spiegel verwendet werden (optional aber empfohlen)
+# $MINICONDA_INSTALL_PATH/bin/conda config --remove channels defaults || true
+$MINICONDA_INSTALL_PATH/bin/conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
+$MINICONDA_INSTALL_PATH/bin/conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/r/
+$MINICONDA_INSTALL_PATH/bin/conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
+$MINICONDA_INSTALL_PATH/bin/conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/ # Nützlich für PyTorch und verwandte Pakete
+$MINICONDA_INSTALL_PATH/bin/conda config --set show_channel_urls yes
+echo "Conda channels configured to use Tsinghua mirrors."
 
 # --- 4. Create and Setup Conda Environment ---
 echo "Creating Conda environment '$CONDA_ENV_NAME' with Python $PYTHON_VERSION..."
 if conda info --envs | grep -q "^$CONDA_ENV_NAME\s"; then
    echo "Conda environment '$CONDA_ENV_NAME' already exists. Skipping creation."
 else
-   conda create -n $CONDA_ENV_NAME python=$PYTHON_VERSION -y
-   echo "Conda environment '$CONDA_ENV_NAME' created."
+    conda create -n $CONDA_ENV_NAME python=$PYTHON_VERSION -y
+    echo "Conda environment '$CONDA_ENV_NAME' created."
 fi
 
 # --- 5. Install vLLM, ModelScope and other Python packages ---
 echo "Activating Conda environment '$CONDA_ENV_NAME' for package installation..."
-# Wichtig: Aktivieren Sie die Umgebung, bevor Sie pip install ausführen, um sicherzustellen, dass Pakete im richtigen Environment landen.
-# Dies ist eine sicherere Methode als `conda run` für mehrere pip-Befehle oder komplexe Installationen.
 source "$MINICONDA_INSTALL_PATH/bin/activate" "$CONDA_ENV_NAME"
+
+echo "Configuring pip to use Tsinghua mirror..."
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# Optional: Überprüfen Sie die Pip-Konfiguration
+# pip config list
 
 echo "Upgrading pip..."
 pip install --upgrade pip
 
 echo "Installing vLLM, nvitop, and modelscope..."
-# tf-keras ist oft eine Abhängigkeit von modelscope oder bestimmten Modellen
 pip install vllm nvitop modelscope "tf-keras>=2.13" # tf-keras hinzugefügt
 
 echo "vLLM, nvitop, and modelscope installed/updated successfully in '$CONDA_ENV_NAME'."
 
 # --- 6. Download Model from ModelScope ---
 echo "Checking for model $MODEL_ID_MODELSCOPE in $MODEL_CACHE_DIR..."
-# Erstellen Sie das Cache-Verzeichnis, falls es nicht existiert.
-# Wichtig: Stellen Sie sicher, dass der ausführende Benutzer Schreibrechte für MODEL_CACHE_DIR hat.
-# Wenn MODEL_CACHE_DIR /AISPK ist (Root-Level), benötigen Sie möglicherweise sudo hier oder müssen Berechtigungen vorher festlegen.
 if [ ! -d "$MODEL_CACHE_DIR" ]; then
     echo "Creating ModelScope cache directory: $MODEL_CACHE_DIR"
     sudo mkdir -p "$MODEL_CACHE_DIR"
-    # Ändern Sie den Besitzer auf den aktuellen Benutzer, damit ModelScope ohne sudo schreiben kann
     sudo chown "$USER":"$USER" "$MODEL_CACHE_DIR"
-    # Für den Fall, dass MODEL_ID_MODELSCOPE Schrägstriche enthält und Unterverzeichnisse erstellt werden müssen
-    # Dies wird von modelscope selbst gehandhabt, aber das Haupt-Cache-Verzeichnis muss existieren und beschreibbar sein.
 fi
 
-# Überprüfen, ob das spezifische Modellverzeichnis bereits existiert
+# Für ModelScope-Downloads: modelscope.cn ist die primäre Quelle.
+# Wenn Sie einen bestimmten Endpunkt für die ModelScope API verwenden möchten (z.B. für regionale Server, falls verfügbar):
+# export MODELSCOPE_HUB_ENDPOINT="https://modelscope.cn/api/v1" # Dies ist oft der Standardwert
+
 if [ -d "$VLLM_MODEL_PATH" ]; then
     echo "Model $MODEL_ID_MODELSCOPE already found in $VLLM_MODEL_PATH. Skipping download."
 else
     echo "Downloading model $MODEL_ID_MODELSCOPE from ModelScope to $MODEL_CACHE_DIR..."
-    # Führen Sie den Download als Python-Befehl aus
-    # Stellen Sie sicher, dass die Umgebung aktiv ist, damit `python` und `modelscope` gefunden werden
+    # Setzen Sie die Umgebungsvariable für ModelScope-Cache und optional den Endpunkt
+    # Die Umgebung muss aktiv sein, damit `python` und `modelscope` gefunden werden
     python -c "
 from modelscope.hub.snapshot_download import snapshot_download
 import os
-os.environ['MODELSCOPE_CACHE'] = '$MODEL_CACHE_DIR' # Setzen Sie die Umgebungsvariable für ModelScope
-snapshot_download('$MODEL_ID_MODELSCOPE', cache_dir='$MODEL_CACHE_DIR', local_dir_layout='{model_id}') # Stellt sicher, dass der Pfad $MODEL_CACHE_DIR/$MODEL_ID_MODELSCOPE ist
+os.environ['MODELSCOPE_CACHE'] = '$MODEL_CACHE_DIR'
+# Optional: Falls Sie einen spezifischen ModelScope API Endpunkt verwenden möchten:
+# os.environ['MODELSCOPE_HUB_ENDPOINT'] = 'https://modelscope.cn/api/v1' # Beispiel
+# Für schnellere Downloads von ModelScope, wenn mehrere Dateien parallel heruntergeladen werden können:
+# os.environ['MODELSCOPE_DOWNLOAD_PARALLEL'] = '8' # Anzahl paralleler Downloads, Standard ist 4
+# Für Debugging-Ausgaben von ModelScope SDK:
+# os.environ['MODELSCOPE_SDK_DEBUG'] = '1'
+
+snapshot_download(
+    '$MODEL_ID_MODELSCOPE',
+    cache_dir='$MODEL_CACHE_DIR',
+    local_dir_layout='{model_id}' # Stellt sicher, dass der Pfad $MODEL_CACHE_DIR/$MODEL_ID_MODELSCOPE ist
+)
 "
     echo "Model downloaded."
 fi
@@ -124,7 +145,6 @@ echo "Port: $PORT"
 echo "Log file: $LOG_FILE"
 echo "--------------------------------------------------"
 
-# Die Umgebung ist bereits aktiv durch `source "$MINICONDA_INSTALL_PATH/bin/activate" "$CONDA_ENV_NAME"`
 if [[ "$CONDA_DEFAULT_ENV" != "$CONDA_ENV_NAME" && "$CONDA_PREFIX" != "$MINICONDA_INSTALL_PATH/envs/$CONDA_ENV_NAME" ]]; then
     echo "Error: Failed to activate conda environment '$CONDA_ENV_NAME' properly. Exiting."
     conda info --envs || echo "Failed to get conda info."
@@ -132,8 +152,6 @@ if [[ "$CONDA_DEFAULT_ENV" != "$CONDA_ENV_NAME" && "$CONDA_PREFIX" != "$MINICOND
 fi
 echo "Conda environment '$CONDA_DEFAULT_ENV' is active."
 
-# Starten Sie den Server im Hintergrund mit nohup und leiten Sie die Ausgabe in eine Log-Datei um.
-# Verwenden Sie trust-remote-code, wenn das Modell dies erfordert (typisch für viele Qwen-Modelle)
 nohup python -m vllm.entrypoints.openai.api_server \
     --model "$VLLM_MODEL_PATH" \
     --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
@@ -145,7 +163,6 @@ nohup python -m vllm.entrypoints.openai.api_server \
     --port "$PORT" \
     --uvicorn-log-level debug > "$LOG_FILE" 2>&1 &
 
-# PID des Hintergrundprozesses abrufen
 SERVER_PID=$!
 echo "vLLM server started in background with PID $SERVER_PID."
 echo "To view logs: tail -f $LOG_FILE"
@@ -155,15 +172,9 @@ echo "Or use: pkill -f 'vllm.entrypoints.openai.api_server.*--port $PORT'"
 # --- 8. Configure UFW Firewall ---
 echo "Configuring UFW firewall..."
 sudo ufw allow "$PORT"/tcp
-sudo ufw status # Zeigt den aktuellen Status an
-# Optional: sudo ufw enable, falls UFW nicht aktiv ist (seien Sie vorsichtig, wenn Sie SSH verwenden, stellen Sie sicher, dass Port 22 erlaubt ist)
-# Optional: sudo ufw reload, um Regeln neu zu laden, falls UFW bereits aktiv ist
+sudo ufw status
 echo "UFW rule for port $PORT/tcp added. If UFW was inactive, you might need to enable it (e.g., 'sudo ufw enable')."
 echo "Ensure SSH (port 22) is allowed if you are enabling UFW for the first time: sudo ufw allow ssh"
-
-# Conda-Umgebung nach dem Starten des Servers nicht mehr deaktivieren, da der Server in dieser Umgebung laufen soll.
-# Das Deaktivieren würde hier keinen Sinn machen, da der Server als Hintergrundprozess weiterläuft.
-# Der `nohup` Prozess ist von der aktuellen Shell entkoppelt.
 
 echo "--------------------------------------------------"
 echo "Script finished. vLLM server should be running."
